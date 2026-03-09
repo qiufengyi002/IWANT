@@ -12,11 +12,7 @@ def show_trading_page(db, user, get_stock_realtime_sina_func, stock_list):
     st.markdown("## 💰 买入股票")
     
     # 显示账户信息
-    col1, col2 = st.columns(2)
-    with col1:
-        st.metric("可用资金", f"¥{user['cash']:,.2f}")
-    with col2:
-        st.metric("用户名", user['username'])
+    st.metric("💰 可用资金", f"¥{user['cash']:,.2f}")
     
     st.markdown("---")
     
@@ -167,16 +163,74 @@ def show_positions_page(db, user, get_stock_realtime_sina_func):
             'profit_percent': profit_percent
         })
     
-    # 显示总资产
-    total_assets = user['cash'] + total_market_value
+    # 计算总盈亏（包括已实现盈亏和未实现盈亏）
+    # 1. 未实现盈亏：当前持仓的盈亏
     total_cost = sum([p['cost'] for p in position_data])
-    total_profit = total_market_value - total_cost
-    total_profit_percent = (total_profit / total_cost * 100) if total_cost > 0 else 0
+    unrealized_profit = total_market_value - total_cost
+    
+    # 2. 已实现盈亏：通过交易记录计算
+    all_transactions = db.get_all_transactions(user['user_id'])
+    
+    # 计算每只股票的已实现盈亏
+    realized_profit = 0
+    stock_buy_records = {}  # 记录每只股票的买入记录
+    
+    for trans in all_transactions:
+        stock_code = trans['stock_code']
+        
+        if trans['type'] == 'BUY':
+            # 记录买入
+            if stock_code not in stock_buy_records:
+                stock_buy_records[stock_code] = []
+            stock_buy_records[stock_code].append({
+                'quantity': trans['quantity'],
+                'price': trans['price'],
+                'amount': trans['amount']
+            })
+        
+        elif trans['type'] == 'SELL':
+            # 计算卖出盈亏
+            if stock_code in stock_buy_records and stock_buy_records[stock_code]:
+                # 计算平均买入成本
+                total_buy_quantity = sum([r['quantity'] for r in stock_buy_records[stock_code]])
+                total_buy_amount = sum([r['amount'] for r in stock_buy_records[stock_code]])
+                avg_buy_price = total_buy_amount / total_buy_quantity if total_buy_quantity > 0 else 0
+                
+                # 计算这笔卖出的盈亏
+                sell_amount = trans['amount']
+                cost_amount = avg_buy_price * trans['quantity']
+                profit = sell_amount - cost_amount
+                realized_profit += profit
+                
+                # 更新买入记录（按比例减少）
+                sell_quantity = trans['quantity']
+                remaining_quantity = sell_quantity
+                
+                for record in stock_buy_records[stock_code][:]:
+                    if remaining_quantity <= 0:
+                        break
+                    
+                    if record['quantity'] <= remaining_quantity:
+                        remaining_quantity -= record['quantity']
+                        stock_buy_records[stock_code].remove(record)
+                    else:
+                        record['quantity'] -= remaining_quantity
+                        record['amount'] = record['quantity'] * record['price']
+                        remaining_quantity = 0
+    
+    # 总盈亏 = 已实现盈亏 + 未实现盈亏
+    total_profit = realized_profit + unrealized_profit
+    
+    # 计算总投入（初始资金 - 当前总资产）
+    initial_capital = 1000000  # 初始资金
+    total_assets = user['cash'] + total_market_value
+    total_invested = initial_capital  # 总投入就是初始资金
+    total_profit_percent = (total_profit / total_invested * 100) if total_invested > 0 else 0
     
     # ==================== 数据统计面板 ====================
     st.markdown("### 📈 资产概览")
     
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3, col4, col5 = st.columns(5)
     with col1:
         st.metric("总资产", f"¥{total_assets:,.2f}")
     with col2:
@@ -184,8 +238,15 @@ def show_positions_page(db, user, get_stock_realtime_sina_func):
     with col3:
         st.metric("可用资金", f"¥{user['cash']:,.2f}")
     with col4:
-        profit_color = "normal" if total_profit >= 0 else "inverse"
-        st.metric("总盈亏", f"¥{total_profit:+,.2f}", f"{total_profit_percent:+.2f}%", delta_color=profit_color)
+        profit_color = "normal" if unrealized_profit >= 0 else "inverse"
+        st.metric("未实现盈亏", f"¥{unrealized_profit:+,.2f}", delta_color=profit_color)
+    with col5:
+        total_profit_color = "normal" if total_profit >= 0 else "inverse"
+        st.metric("总盈亏", f"¥{total_profit:+,.2f}", f"{total_profit_percent:+.2f}%", delta_color=total_profit_color)
+    
+    # 显示已实现盈亏
+    if realized_profit != 0:
+        st.info(f"💰 已实现盈亏: ¥{realized_profit:+,.2f}")
     
     if not positions:
         st.info("暂无持仓")
@@ -538,25 +599,169 @@ def show_transactions_page(db, user):
     transactions = db.get_transactions(user['user_id'], limit=100)
     
     if not transactions:
-        st.info("暂无交易记录")
+        st.info("💡 暂无交易记录，开始您的第一笔交易吧！")
         return
     
-    # 转换为DataFrame
+    # 统计信息
     import pandas as pd
+    from datetime import datetime, timedelta
+    
+    buy_count = sum(1 for t in transactions if t['type'] == 'BUY')
+    sell_count = sum(1 for t in transactions if t['type'] == 'SELL')
+    total_buy_amount = sum(t['amount'] for t in transactions if t['type'] == 'BUY')
+    total_sell_amount = sum(t['amount'] for t in transactions if t['type'] == 'SELL')
+    
+    # 显示统计卡片
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.markdown(f"""
+        <div style="
+            background: linear-gradient(135deg, rgba(0, 255, 136, 0.1) 0%, rgba(255,255,255,0.05) 100%);
+            border-radius: 10px;
+            padding: 15px;
+            border: 1px solid rgba(0, 255, 136, 0.3);
+        ">
+            <div style="font-size: 14px; color: rgba(255,255,255,0.7); margin-bottom: 5px;">买入次数</div>
+            <div style="font-size: 24px; font-weight: bold; color: #00ff88;">{buy_count}</div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col2:
+        st.markdown(f"""
+        <div style="
+            background: linear-gradient(135deg, rgba(255, 71, 87, 0.1) 0%, rgba(255,255,255,0.05) 100%);
+            border-radius: 10px;
+            padding: 15px;
+            border: 1px solid rgba(255, 71, 87, 0.3);
+        ">
+            <div style="font-size: 14px; color: rgba(255,255,255,0.7); margin-bottom: 5px;">卖出次数</div>
+            <div style="font-size: 24px; font-weight: bold; color: #ff4757;">{sell_count}</div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col3:
+        st.markdown(f"""
+        <div style="
+            background: linear-gradient(135deg, rgba(0, 255, 136, 0.1) 0%, rgba(255,255,255,0.05) 100%);
+            border-radius: 10px;
+            padding: 15px;
+            border: 1px solid rgba(0, 255, 136, 0.3);
+        ">
+            <div style="font-size: 14px; color: rgba(255,255,255,0.7); margin-bottom: 5px;">买入总额</div>
+            <div style="font-size: 20px; font-weight: bold; color: #00ff88;">¥{total_buy_amount:,.0f}</div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col4:
+        st.markdown(f"""
+        <div style="
+            background: linear-gradient(135deg, rgba(255, 71, 87, 0.1) 0%, rgba(255,255,255,0.05) 100%);
+            border-radius: 10px;
+            padding: 15px;
+            border: 1px solid rgba(255, 71, 87, 0.3);
+        ">
+            <div style="font-size: 14px; color: rgba(255,255,255,0.7); margin-bottom: 5px;">卖出总额</div>
+            <div style="font-size: 20px; font-weight: bold; color: #ff4757;">¥{total_sell_amount:,.0f}</div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    st.markdown("---")
+    
+    # 筛选选项
+    col_filter1, col_filter2 = st.columns([1, 3])
+    
+    with col_filter1:
+        filter_type = st.selectbox(
+            "交易类型",
+            ["全部", "买入", "卖出"],
+            key="trans_filter_type"
+        )
+    
+    with col_filter2:
+        filter_stock = st.text_input(
+            "搜索股票",
+            placeholder="输入股票代码或名称",
+            key="trans_filter_stock"
+        )
+    
+    # 转换为DataFrame并应用筛选
     trans_data = []
     for t in transactions:
+        # 解析时间字符串并转换为本地时间
+        try:
+            time_str = t['time']
+            if isinstance(time_str, str):
+                utc_time = datetime.strptime(time_str, '%Y-%m-%d %H:%M:%S')
+                local_time = utc_time + timedelta(hours=8)
+                time_display = local_time.strftime('%Y-%m-%d %H:%M:%S')
+            else:
+                time_display = str(time_str)
+        except:
+            time_display = str(t['time'])
+        
+        trans_type = '买入' if t['type'] == 'BUY' else '卖出'
+        
+        # 应用筛选
+        if filter_type != "全部" and trans_type != filter_type:
+            continue
+        
+        if filter_stock and filter_stock not in t['stock_code'] and filter_stock not in t['stock_name']:
+            continue
+        
         trans_data.append({
-            '时间': t['time'],
+            '时间': time_display,
             '股票代码': t['stock_code'],
             '股票名称': t['stock_name'],
-            '类型': '买入' if t['type'] == 'BUY' else '卖出',
+            '类型': trans_type,
             '数量': t['quantity'],
-            '价格': f"¥{t['price']:.2f}",
-            '金额': f"¥{t['amount']:,.2f}"
+            '价格': t['price'],
+            '金额': t['amount'],
+            '_type_raw': t['type']  # 用于样式判断
         })
     
-    df = pd.DataFrame(trans_data)
-    st.dataframe(df, use_container_width=True, height=600)
+    if not trans_data:
+        st.info("💡 没有符合条件的交易记录")
+        return
+    
+    # 使用卡片式展示
+    st.markdown(f"### 📋 交易明细 ({len(trans_data)} 条记录)")
+    
+    for idx, trans in enumerate(trans_data):
+        is_buy = trans['_type_raw'] == 'BUY'
+        bg_color = "rgba(0, 255, 136, 0.05)" if is_buy else "rgba(255, 71, 87, 0.05)"
+        border_color = "rgba(0, 255, 136, 0.3)" if is_buy else "rgba(255, 71, 87, 0.3)"
+        type_color = "#00ff88" if is_buy else "#ff4757"
+        type_icon = "🟢" if is_buy else "🔴"
+        
+        card_html = f"""
+        <div style="
+            background: {bg_color};
+            border-radius: 10px;
+            padding: 15px;
+            margin-bottom: 10px;
+            border: 1px solid {border_color};
+        ">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <div style="flex: 1;">
+                    <div style="display: flex; align-items: center; margin-bottom: 8px;">
+                        <span style="font-size: 18px; margin-right: 8px;">{type_icon}</span>
+                        <span style="font-size: 16px; font-weight: bold; color: {type_color};">{trans['类型']}</span>
+                        <span style="font-size: 16px; font-weight: bold; color: #fff; margin-left: 15px;">{trans['股票代码']} - {trans['股票名称']}</span>
+                    </div>
+                    <div style="display: flex; gap: 20px; font-size: 14px; color: rgba(255,255,255,0.7);">
+                        <span>数量: <span style="color: #fff; font-weight: bold;">{trans['数量']}</span> 股</span>
+                        <span>价格: <span style="color: #fff; font-weight: bold;">¥{trans['价格']:.2f}</span></span>
+                        <span>金额: <span style="color: {type_color}; font-weight: bold;">¥{trans['金额']:,.2f}</span></span>
+                    </div>
+                </div>
+                <div style="text-align: right; color: rgba(255,255,255,0.5); font-size: 12px;">
+                    {trans['时间']}
+                </div>
+            </div>
+        </div>
+        """
+        st.markdown(card_html, unsafe_allow_html=True)
 
 
 
@@ -640,19 +845,12 @@ def show_watchlist_page(db, user, get_stock_realtime_sina_func, stock_list):
             change = realtime_data['change']
             change_percent = realtime_data['change_percent']
             
-            # 检查价格提醒
-            alert_triggered = False
-            if stock['alert_price'] and current_price >= stock['alert_price']:
-                alert_triggered = True
-            
             watchlist_data.append({
                 'stock_code': stock_code,
                 'stock_name': stock['stock_name'],
                 'current_price': current_price,
                 'change': change,
                 'change_percent': change_percent,
-                'alert_price': stock['alert_price'],
-                'alert_triggered': alert_triggered,
                 'symbol': symbol
             })
     
@@ -685,11 +883,11 @@ def show_watchlist_page(db, user, get_stock_realtime_sina_func, stock_list):
                 
                 with col_btn1:
                     if st.button("📈 查看", key=f"view_{stock_data['stock_code']}", use_container_width=True):
-                        # 设置要查看的股票信息 - 使用更持久的方式
+                        # 设置要查看的股票信息
                         st.session_state['view_stock_code'] = stock_data['stock_code']
                         st.session_state['view_stock_name'] = stock_data['stock_name']
                         st.session_state['view_stock_symbol'] = stock_data['symbol']
-                        # 跳转到行情查询页面
+                        # 切换到行情查询页面
                         st.session_state.current_page = "行情查询"
                         st.rerun()
                 
@@ -705,16 +903,3 @@ def show_watchlist_page(db, user, get_stock_realtime_sina_func, stock_list):
                             st.error(message)
             
             st.markdown("---")
-    
-    # ==================== 价格提醒统计 ====================
-    st.markdown("---")
-    st.markdown("### 🔔 价格提醒")
-    
-    triggered_alerts = [s for s in watchlist_data if s['alert_triggered']]
-    
-    if triggered_alerts:
-        st.warning(f"⚠️ 有 {len(triggered_alerts)} 只股票达到提醒价格！")
-        for alert in triggered_alerts:
-            st.markdown(f"- **{alert['stock_name']}** 当前价格 ¥{alert['current_price']:.2f}，已达到提醒价格 ¥{alert['alert_price']:.2f}")
-    else:
-        st.info("✅ 暂无价格提醒触发")

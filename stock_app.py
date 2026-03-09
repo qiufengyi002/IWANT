@@ -129,10 +129,23 @@ if st.session_state.user is None:
     page = "行情查询"
 else:
     # 已登录，显示用户信息和完整导航
-    st.sidebar.success(f"👤 {st.session_state.user['username']}")
-    st.sidebar.metric("� 可用资金", f"¥{st.session_state.user['cash']:,.2f}")
+    # 用户信息卡片
+    st.sidebar.markdown(f"""
+    <div style="
+        background: linear-gradient(135deg, rgba(0, 245, 255, 0.1) 0%, rgba(255,255,255,0.05) 100%);
+        border-radius: 12px;
+        padding: 15px;
+        margin-bottom: 15px;
+        border: 1px solid rgba(0, 245, 255, 0.3);
+    ">
+        <div style="font-size: 14px; color: rgba(255,255,255,0.7); margin-bottom: 5px;">👤 当前用户</div>
+        <div style="font-size: 18px; font-weight: bold; color: #00f5ff; margin-bottom: 10px;">{st.session_state.user['username']}</div>
+        <div style="font-size: 12px; color: rgba(255,255,255,0.6);">💰 可用资金</div>
+        <div style="font-size: 20px; font-weight: bold; color: #00ff88;">¥{st.session_state.user['cash']:,.2f}</div>
+    </div>
+    """, unsafe_allow_html=True)
     
-    if st.sidebar.button("🚪 退出登录"):
+    if st.sidebar.button("🚪 退出登录", use_container_width=True, type="secondary"):
         st.session_state.user = None
         # 清除URL参数
         if 'username' in st.query_params:
@@ -140,31 +153,50 @@ else:
         st.rerun()
     
     st.sidebar.markdown("---")
+    st.sidebar.markdown("### 📑 功能导航")
     
-    # 页面导航 - 使用session_state管理页面状态
+    # 初始化current_page
     if 'current_page' not in st.session_state:
         st.session_state.current_page = "行情查询"
     
-    page = st.sidebar.radio(
-        "📑 功能导航",
-        ["行情查询", "买入股票", "我的自选", "我的持仓", "交易记录"],
-        index=["行情查询", "买入股票", "我的自选", "我的持仓", "交易记录"].index(st.session_state.current_page),
-        key="page_navigation"
-    )
+    # 导航选项配置
+    nav_options = [
+        {"name": "行情查询", "icon": "📈"},
+        {"name": "买入股票", "icon": "💰"},
+        {"name": "我的自选", "icon": "⭐"},
+        {"name": "我的持仓", "icon": "📊"},
+        {"name": "交易记录", "icon": "📜"}
+    ]
     
-    # 检测页面切换，如果切换到买入股票页面，清空之前的选择
-    if page != st.session_state.current_page:
-        if page == "买入股票":
-            # 清空模拟交易的选择状态
-            st.session_state.trading_search_query = ""
-            st.session_state.trading_stock_code = ""
-            st.session_state.trading_stock_name = ""
-        elif page == "我的自选":
-            # 清空自选股搜索状态
-            st.session_state.watchlist_search_query = ""
+    # 创建导航按钮
+    for option in nav_options:
+        is_active = st.session_state.current_page == option["name"]
+        button_type = "primary" if is_active else "secondary"
+        button_label = f"{option['icon']} {option['name']}"
+        
+        if st.sidebar.button(
+            button_label,
+            key=f"nav_{option['name']}",
+            use_container_width=True,
+            type=button_type
+        ):
+            if st.session_state.current_page != option["name"]:
+                # 页面切换逻辑
+                if option["name"] == "买入股票":
+                    if 'trading_search_query' in st.session_state:
+                        st.session_state.trading_search_query = ""
+                    if 'trading_stock_code' in st.session_state:
+                        st.session_state.trading_stock_code = ""
+                    if 'trading_stock_name' in st.session_state:
+                        st.session_state.trading_stock_name = ""
+                elif option["name"] == "我的自选":
+                    if 'watchlist_search_query' in st.session_state:
+                        st.session_state.watchlist_search_query = ""
+                
+                st.session_state.current_page = option["name"]
+                st.rerun()
     
-    # 更新当前页面
-    st.session_state.current_page = page
+    page = st.session_state.current_page
 
 st.sidebar.markdown("---")
 
@@ -701,10 +733,6 @@ if page == "行情查询":
     if 'view_stock_code' in st.session_state and st.session_state.get('view_stock_code'):
         quick_select_value = f"{st.session_state['view_stock_code']} - {st.session_state['view_stock_name']}"
         auto_select_symbol = st.session_state['view_stock_symbol']
-        # 清空标记
-        st.session_state['view_stock_code'] = None
-        st.session_state['view_stock_name'] = None
-        st.session_state['view_stock_symbol'] = None
     
     # 搜索输入框（使用唯一key防止浏览器自动填充）
     search_query = st.sidebar.text_input(
@@ -715,11 +743,24 @@ if page == "行情查询":
         key="stock_search_input"
     )
     
+    # 如果用户修改了搜索框内容，清空自选股跳转标记
+    if search_query != quick_select_value and st.session_state.get('view_stock_code'):
+        st.session_state['view_stock_code'] = None
+        st.session_state['view_stock_name'] = None
+        st.session_state['view_stock_symbol'] = None
+        auto_select_symbol = None
+    
     # 实时搜索并显示结果
     stock_symbol_from_search = None
     search_selected = False
     
-    if search_query:
+    # 如果是从自选股跳转过来的，直接使用传入的symbol
+    if auto_select_symbol:
+        stock_symbol_from_search = auto_select_symbol
+        search_selected = True
+        # 显示选中的股票信息
+        st.sidebar.success(f"✅ 已选择: {quick_select_value}")
+    elif search_query:
         search_results = search_stock_by_name(search_query, stock_list)
         
         if search_results:
@@ -729,25 +770,15 @@ if page == "行情查询":
             # 只显示前10个结果，避免列表太长
             display_results = search_results[:10]
             
-            # 如果有自动选择的symbol，找到对应的索引
-            default_index = 0
-            if auto_select_symbol:
-                for i, stock in enumerate(display_results):
-                    if stock['symbol'] == auto_select_symbol:
-                        default_index = i
-                        stock_symbol_from_search = stock['symbol']
-                        search_selected = True
-                        break
-            
             selected_display = st.sidebar.radio(
                 "选择股票",
                 options=[s['display'] for s in display_results],
-                index=default_index,
+                index=0,
                 key="search_results",
                 label_visibility="collapsed"
             )
             
-            if selected_display and not auto_select_symbol:
+            if selected_display:
                 for stock in display_results:
                     if stock['display'] == selected_display:
                         stock_symbol_from_search = stock['symbol']
@@ -761,7 +792,18 @@ if page == "行情查询":
     else:
         st.sidebar.info("💡 请输入股票名称或代码")
     
+    # 快速选择热门股票
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("### 🔥 快速选择热门股票")
+    quick_stocks = st.sidebar.selectbox(
+        "快速选择热门股票",
+        ["", "600519 - 贵州茅台", "000001 - 平安银行", "000858 - 五粮液", "601318 - 中国平安", "000333 - 美的集团", "300750 - 宁德时代", "600036 - 招商银行"],
+        key="quick_select",
+        label_visibility="collapsed"
+    )
+    
     # 日期范围选择
+    st.sidebar.markdown("---")
     st.sidebar.subheader("📅 日期范围")
     date_option = st.sidebar.radio(
         "选择时间范围",
@@ -774,15 +816,6 @@ if page == "行情查询":
     days = days_map[date_option]
     start_date = datetime.now() - timedelta(days=days)
     end_date = datetime.now()
-    
-    # 快速选择热门股票
-    st.sidebar.markdown("---")
-    st.sidebar.markdown("### � 快速选择热门股票")
-    quick_stocks = st.sidebar.selectbox(
-        "一键选择",
-        ["", "600519 - 贵州茅台", "000001 - 平安银行", "000858 - 五粮液", "601318 - 中国平安", "000333 - 美的集团", "300750 - 宁德时代", "600036 - 招商银行"],
-        key="quick_select"
-    )
     
     # 检测用户操作：判断是搜索还是快速选择
     search_changed = search_query != st.session_state.last_search_query
