@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 import requests
 import json
 from trading_db import TradingDB
-from pages_trading import show_trading_page, show_positions_page, show_transactions_page
+from pages_trading import show_trading_page, show_positions_page, show_transactions_page, show_watchlist_page
 
 # 初始化数据库
 db = TradingDB()
@@ -147,8 +147,8 @@ else:
     
     page = st.sidebar.radio(
         "📑 功能导航",
-        ["行情查询", "买入股票", "我的持仓", "交易记录"],
-        index=["行情查询", "买入股票", "我的持仓", "交易记录"].index(st.session_state.current_page),
+        ["行情查询", "买入股票", "我的自选", "我的持仓", "交易记录"],
+        index=["行情查询", "买入股票", "我的自选", "我的持仓", "交易记录"].index(st.session_state.current_page),
         key="page_navigation"
     )
     
@@ -159,6 +159,9 @@ else:
             st.session_state.trading_search_query = ""
             st.session_state.trading_stock_code = ""
             st.session_state.trading_stock_name = ""
+        elif page == "我的自选":
+            # 清空自选股搜索状态
+            st.session_state.watchlist_search_query = ""
     
     # 更新当前页面
     st.session_state.current_page = page
@@ -690,10 +693,23 @@ if page == "行情查询":
     if 'last_quick_select' not in st.session_state:
         st.session_state.last_quick_select = ""
     
+    # 处理从自选股页面跳转过来的快速选择
+    quick_select_value = ""
+    auto_select_symbol = None
+    
+    # 检查是否有从自选股传来的查看请求
+    if 'view_stock_code' in st.session_state and st.session_state.get('view_stock_code'):
+        quick_select_value = f"{st.session_state['view_stock_code']} - {st.session_state['view_stock_name']}"
+        auto_select_symbol = st.session_state['view_stock_symbol']
+        # 清空标记
+        st.session_state['view_stock_code'] = None
+        st.session_state['view_stock_name'] = None
+        st.session_state['view_stock_symbol'] = None
+    
     # 搜索输入框（使用唯一key防止浏览器自动填充）
     search_query = st.sidebar.text_input(
         "输入股票代码或名称",
-        value="",
+        value=quick_select_value,
         placeholder="如：茅台、600519",
         help="💡 输入关键词后，下方会显示匹配的股票列表",
         key="stock_search_input"
@@ -712,14 +728,26 @@ if page == "行情查询":
             
             # 只显示前10个结果，避免列表太长
             display_results = search_results[:10]
+            
+            # 如果有自动选择的symbol，找到对应的索引
+            default_index = 0
+            if auto_select_symbol:
+                for i, stock in enumerate(display_results):
+                    if stock['symbol'] == auto_select_symbol:
+                        default_index = i
+                        stock_symbol_from_search = stock['symbol']
+                        search_selected = True
+                        break
+            
             selected_display = st.sidebar.radio(
                 "选择股票",
                 options=[s['display'] for s in display_results],
+                index=default_index,
                 key="search_results",
                 label_visibility="collapsed"
             )
             
-            if selected_display:
+            if selected_display and not auto_select_symbol:
                 for stock in display_results:
                     if stock['display'] == selected_display:
                         stock_symbol_from_search = stock['symbol']
@@ -1027,6 +1055,15 @@ elif page == "买入股票":
         # 获取股票列表
         stock_list = get_stock_list()
         show_trading_page(db, user, get_stock_realtime_sina, stock_list)
+    else:
+        st.warning("请先登录")
+
+elif page == "我的自选":
+    # ==================== 自选股页面 ====================
+    if st.session_state.user:
+        # 获取股票列表
+        stock_list = get_stock_list()
+        show_watchlist_page(db, st.session_state.user, get_stock_realtime_sina, stock_list)
     else:
         st.warning("请先登录")
 

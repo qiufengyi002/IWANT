@@ -557,3 +557,164 @@ def show_transactions_page(db, user):
     
     df = pd.DataFrame(trans_data)
     st.dataframe(df, use_container_width=True, height=600)
+
+
+
+def show_watchlist_page(db, user, get_stock_realtime_sina_func, stock_list):
+    """显示自选股页面"""
+    st.markdown("## ⭐ 我的自选股")
+    
+    # 获取自选股列表
+    watchlist = db.get_watchlist(user['user_id'])
+    
+    # ==================== 添加自选股 ====================
+    with st.expander("➕ 添加自选股", expanded=False):
+        st.markdown("#### 搜索股票")
+        
+        # 初始化session state
+        if 'watchlist_search_query' not in st.session_state:
+            st.session_state.watchlist_search_query = ""
+        
+        search_query = st.text_input(
+            "输入股票代码或名称",
+            value=st.session_state.watchlist_search_query,
+            placeholder="如：茅台、600519",
+            key="watchlist_search_input"
+        )
+        
+        # 实时搜索并显示结果
+        if search_query:
+            st.session_state.watchlist_search_query = search_query
+            
+            # 搜索匹配的股票
+            search_results = []
+            for stock in stock_list:
+                if search_query.upper() in stock['code'].upper() or search_query in stock['name']:
+                    search_results.append(stock)
+                    if len(search_results) >= 10:
+                        break
+            
+            if search_results:
+                st.markdown(f"**找到 {len(search_results)} 只股票：**")
+                
+                # 使用按钮显示搜索结果
+                for stock in search_results:
+                    col_a, col_b = st.columns([3, 1])
+                    with col_a:
+                        st.write(f"📊 {stock['display']}")
+                    with col_b:
+                        if st.button("添加", key=f"add_watch_{stock['code']}", use_container_width=True):
+                            success, message = db.add_to_watchlist(
+                                user['user_id'],
+                                stock['code'],
+                                stock['name']
+                            )
+                            if success:
+                                st.session_state.watchlist_search_query = ""
+                                st.rerun()
+                            else:
+                                st.error(message)
+            else:
+                st.warning("⚠️ 未找到匹配的股票")
+    
+    st.markdown("---")
+    
+    # ==================== 自选股列表 ====================
+    if not watchlist:
+        st.info("💡 暂无自选股，请添加关注的股票")
+        return
+    
+    st.markdown(f"### 📋 自选股列表（共 {len(watchlist)} 只）")
+    
+    # 获取所有自选股的实时行情
+    watchlist_data = []
+    for stock in watchlist:
+        stock_code = stock['stock_code']
+        symbol = f"{stock_code}.SS" if stock_code.startswith('6') or stock_code.startswith('5') or stock_code.startswith('688') else f"{stock_code}.SZ"
+        
+        # 获取实时价格
+        realtime_data, _ = get_stock_realtime_sina_func(symbol)
+        
+        if realtime_data:
+            current_price = realtime_data['price']
+            change = realtime_data['change']
+            change_percent = realtime_data['change_percent']
+            
+            # 检查价格提醒
+            alert_triggered = False
+            if stock['alert_price'] and current_price >= stock['alert_price']:
+                alert_triggered = True
+            
+            watchlist_data.append({
+                'stock_code': stock_code,
+                'stock_name': stock['stock_name'],
+                'current_price': current_price,
+                'change': change,
+                'change_percent': change_percent,
+                'alert_price': stock['alert_price'],
+                'alert_triggered': alert_triggered,
+                'symbol': symbol
+            })
+    
+    # 显示自选股卡片
+    for stock_data in watchlist_data:
+        is_up = stock_data['change'] >= 0
+        arrow = "▲" if is_up else "▼"
+        
+        # 使用 Streamlit 原生组件
+        with st.container():
+            # 使用列布局
+            col_info, col_price, col_actions = st.columns([3, 2, 2])
+            
+            with col_info:
+                # 股票名称和代码
+                st.markdown(f"**{stock_data['stock_name']}** ({stock_data['stock_code']})")
+                st.caption(f"当前价格: ¥{stock_data['current_price']:.2f}")
+            
+            with col_price:
+                # 涨跌信息
+                change_text = f"{arrow} {stock_data['change']:+.2f} ({stock_data['change_percent']:+.2f}%)"
+                if is_up:
+                    st.success(change_text)
+                else:
+                    st.error(change_text)
+            
+            with col_actions:
+                # 操作按钮
+                col_btn1, col_btn2 = st.columns(2)
+                
+                with col_btn1:
+                    if st.button("📈 查看", key=f"view_{stock_data['stock_code']}", use_container_width=True):
+                        # 设置要查看的股票信息 - 使用更持久的方式
+                        st.session_state['view_stock_code'] = stock_data['stock_code']
+                        st.session_state['view_stock_name'] = stock_data['stock_name']
+                        st.session_state['view_stock_symbol'] = stock_data['symbol']
+                        # 跳转到行情查询页面
+                        st.session_state.current_page = "行情查询"
+                        st.rerun()
+                
+                with col_btn2:
+                    if st.button("🗑️ 移除", key=f"remove_{stock_data['stock_code']}", use_container_width=True):
+                        success, message = db.remove_from_watchlist(
+                            user['user_id'],
+                            stock_data['stock_code']
+                        )
+                        if success:
+                            st.rerun()
+                        else:
+                            st.error(message)
+            
+            st.markdown("---")
+    
+    # ==================== 价格提醒统计 ====================
+    st.markdown("---")
+    st.markdown("### 🔔 价格提醒")
+    
+    triggered_alerts = [s for s in watchlist_data if s['alert_triggered']]
+    
+    if triggered_alerts:
+        st.warning(f"⚠️ 有 {len(triggered_alerts)} 只股票达到提醒价格！")
+        for alert in triggered_alerts:
+            st.markdown(f"- **{alert['stock_name']}** 当前价格 ¥{alert['current_price']:.2f}，已达到提醒价格 ¥{alert['alert_price']:.2f}")
+    else:
+        st.info("✅ 暂无价格提醒触发")

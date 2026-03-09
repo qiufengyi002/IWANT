@@ -64,6 +64,20 @@ class TradingDB:
             )
         ''')
         
+        # 创建自选股表
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS watchlist (
+                watchlist_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                stock_code TEXT NOT NULL,
+                stock_name TEXT NOT NULL,
+                alert_price REAL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(user_id),
+                UNIQUE(user_id, stock_code)
+            )
+        ''')
+        
         conn.commit()
         conn.close()
     
@@ -332,3 +346,78 @@ class TradingDB:
             'buy_count': buy_count,
             'sell_count': sell_count
         }
+    
+    def add_to_watchlist(self, user_id, stock_code, stock_name, alert_price=None):
+        """添加自选股"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute(
+                'INSERT INTO watchlist (user_id, stock_code, stock_name, alert_price) VALUES (?, ?, ?, ?)',
+                (user_id, stock_code, stock_name, alert_price)
+            )
+            conn.commit()
+            return True, "添加成功"
+        except sqlite3.IntegrityError:
+            return False, "该股票已在自选股中"
+        except Exception as e:
+            return False, f"添加失败: {str(e)}"
+        finally:
+            conn.close()
+    
+    def remove_from_watchlist(self, user_id, stock_code):
+        """移除自选股"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute(
+                'DELETE FROM watchlist WHERE user_id = ? AND stock_code = ?',
+                (user_id, stock_code)
+            )
+            conn.commit()
+            return True, "移除成功"
+        except Exception as e:
+            return False, f"移除失败: {str(e)}"
+        finally:
+            conn.close()
+    
+    def get_watchlist(self, user_id):
+        """获取自选股列表"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute(
+            'SELECT stock_code, stock_name, alert_price, created_at FROM watchlist WHERE user_id = ? ORDER BY created_at DESC',
+            (user_id,)
+        )
+        watchlist = cursor.fetchall()
+        conn.close()
+        
+        return [
+            {
+                'stock_code': w[0],
+                'stock_name': w[1],
+                'alert_price': w[2],
+                'created_at': w[3]
+            }
+            for w in watchlist
+        ]
+    
+    def update_alert_price(self, user_id, stock_code, alert_price):
+        """更新价格提醒"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute(
+                'UPDATE watchlist SET alert_price = ? WHERE user_id = ? AND stock_code = ?',
+                (alert_price, user_id, stock_code)
+            )
+            conn.commit()
+            return True, "更新成功"
+        except Exception as e:
+            return False, f"更新失败: {str(e)}"
+        finally:
+            conn.close()
