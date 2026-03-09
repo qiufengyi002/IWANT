@@ -274,3 +274,61 @@ class TradingDB:
             }
             for t in transactions
         ]
+    
+    def get_all_transactions(self, user_id):
+        """获取所有交易记录（用于统计）"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute(
+            'SELECT stock_code, stock_name, transaction_type, quantity, price, amount, created_at FROM transactions WHERE user_id = ? ORDER BY created_at ASC',
+            (user_id,)
+        )
+        transactions = cursor.fetchall()
+        conn.close()
+        
+        return [
+            {
+                'stock_code': t[0],
+                'stock_name': t[1],
+                'type': t[2],
+                'quantity': t[3],
+                'price': t[4],
+                'amount': t[5],
+                'time': t[6]
+            }
+            for t in transactions
+        ]
+    
+    def get_user_stats(self, user_id):
+        """获取用户统计数据"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        # 获取总交易次数
+        cursor.execute(
+            'SELECT COUNT(*) FROM transactions WHERE user_id = ?',
+            (user_id,)
+        )
+        total_trades = cursor.fetchone()[0]
+        
+        # 获取买入和卖出次数
+        cursor.execute(
+            'SELECT COUNT(*) FROM transactions WHERE user_id = ? AND transaction_type = ?',
+            (user_id, 'BUY')
+        )
+        buy_count = cursor.fetchone()[0]
+        
+        cursor.execute(
+            'SELECT COUNT(*) FROM transactions WHERE user_id = ? AND transaction_type = ?',
+            (user_id, 'SELL')
+        )
+        sell_count = cursor.fetchone()[0]
+        
+        conn.close()
+        
+        return {
+            'total_trades': total_trades,
+            'buy_count': buy_count,
+            'sell_count': sell_count
+        }

@@ -135,11 +135,7 @@ def show_positions_page(db, user, get_stock_realtime_sina_func):
     # 获取持仓
     positions = db.get_positions(user['user_id'])
     
-    if not positions:
-        st.info("暂无持仓")
-        return
-    
-    # 计算总资产
+    # 计算总资产和持仓数据
     total_market_value = 0
     position_data = []
     
@@ -166,23 +162,258 @@ def show_positions_page(db, user, get_stock_realtime_sina_func):
             'avg_cost': pos['avg_cost'],
             'current_price': current_price,
             'market_value': market_value,
+            'cost': cost,
             'profit': profit,
             'profit_percent': profit_percent
         })
     
     # 显示总资产
     total_assets = user['cash'] + total_market_value
-    col1, col2, col3 = st.columns(3)
+    total_cost = sum([p['cost'] for p in position_data])
+    total_profit = total_market_value - total_cost
+    total_profit_percent = (total_profit / total_cost * 100) if total_cost > 0 else 0
+    
+    # ==================== 数据统计面板 ====================
+    st.markdown("### 📈 资产概览")
+    
+    col1, col2, col3, col4 = st.columns(4)
     with col1:
         st.metric("总资产", f"¥{total_assets:,.2f}")
     with col2:
         st.metric("持仓市值", f"¥{total_market_value:,.2f}")
     with col3:
         st.metric("可用资金", f"¥{user['cash']:,.2f}")
+    with col4:
+        profit_color = "normal" if total_profit >= 0 else "inverse"
+        st.metric("总盈亏", f"¥{total_profit:+,.2f}", f"{total_profit_percent:+.2f}%", delta_color=profit_color)
+    
+    if not positions:
+        st.info("暂无持仓")
+        return
     
     st.markdown("---")
     
-    # 显示持仓列表 - 使用卡片形式，每个持仓一个卡片
+    # ==================== 数据可视化 ====================
+    st.markdown("### 📊 数据分析")
+    
+    # 创建两列布局
+    viz_col1, viz_col2 = st.columns(2)
+    
+    with viz_col1:
+        # 持仓分布饼图
+        st.markdown("#### 持仓分布")
+        import plotly.graph_objects as go
+        
+        fig_pie = go.Figure(data=[go.Pie(
+            labels=[f"{p['stock_name']}<br>({p['stock_code']})" for p in position_data],
+            values=[p['market_value'] for p in position_data],
+            hole=0.4,
+            textinfo='label+percent',
+            textposition='auto',
+            marker=dict(
+                colors=['#00ff88', '#00d4ff', '#ffd700', '#ff6b6b', '#a29bfe', '#fd79a8', '#fdcb6e', '#6c5ce7'],
+                line=dict(color='#1e1e1e', width=2)
+            )
+        )])
+        
+        fig_pie.update_layout(
+            showlegend=True,
+            height=350,
+            margin=dict(t=20, b=20, l=20, r=20),
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
+            font=dict(size=10)
+        )
+        
+        st.plotly_chart(fig_pie, use_container_width=True)
+    
+    with viz_col2:
+        # 盈亏排行
+        st.markdown("#### 盈亏排行")
+        
+        # 按盈亏排序
+        sorted_positions = sorted(position_data, key=lambda x: x['profit'], reverse=True)
+        
+        for i, pos in enumerate(sorted_positions[:5]):  # 只显示前5名
+            profit_color = "#00ff88" if pos['profit'] >= 0 else "#ff4757"
+            rank_emoji = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"][i]
+            
+            st.markdown(f"""
+            <div style="
+                background: rgba(255,255,255,0.05);
+                border-radius: 8px;
+                padding: 10px;
+                margin-bottom: 8px;
+                border-left: 3px solid {profit_color};
+            ">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <div>
+                        <span style="font-size: 16px;">{rank_emoji}</span>
+                        <span style="font-size: 14px; margin-left: 8px;">{pos['stock_name']}</span>
+                    </div>
+                    <div style="text-align: right;">
+                        <div style="color: {profit_color}; font-weight: bold;">
+                            ¥{pos['profit']:+,.2f}
+                        </div>
+                        <div style="font-size: 12px; color: {profit_color};">
+                            {pos['profit_percent']:+.2f}%
+                        </div>
+                    </div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+    
+    # ==================== 交易统计 ====================
+    st.markdown("---")
+    st.markdown("### 📈 交易统计")
+    
+    # 获取统计数据
+    stats = db.get_user_stats(user['user_id'])
+    all_transactions = db.get_all_transactions(user['user_id'])
+    
+    # 计算交易胜率（卖出盈利的次数 / 总卖出次数）
+    sell_transactions = [t for t in all_transactions if t['type'] == 'SELL']
+    profitable_sells = 0
+    
+    # 简化的胜率计算：比较卖出价格和平均买入成本
+    for sell_trans in sell_transactions:
+        stock_code = sell_trans['stock_code']
+        sell_price = sell_trans['price']
+        
+        # 找到该股票之前的买入记录
+        buy_transactions = [t for t in all_transactions if t['stock_code'] == stock_code and t['type'] == 'BUY' and t['time'] < sell_trans['time']]
+        
+        if buy_transactions:
+            avg_buy_price = sum([t['price'] * t['quantity'] for t in buy_transactions]) / sum([t['quantity'] for t in buy_transactions])
+            if sell_price > avg_buy_price:
+                profitable_sells += 1
+    
+    win_rate = (profitable_sells / len(sell_transactions) * 100) if sell_transactions else 0
+    
+    stat_col1, stat_col2, stat_col3, stat_col4 = st.columns(4)
+    
+    with stat_col1:
+        st.metric("总交易次数", f"{stats['total_trades']}")
+    with stat_col2:
+        st.metric("买入次数", f"{stats['buy_count']}")
+    with stat_col3:
+        st.metric("卖出次数", f"{stats['sell_count']}")
+    with stat_col4:
+        win_rate_color = "normal" if win_rate >= 50 else "inverse"
+        st.metric("交易胜率", f"{win_rate:.1f}%", delta_color=win_rate_color)
+    
+    # ==================== 资产曲线图 ====================
+    if all_transactions:
+        st.markdown("---")
+        st.markdown("### 📈 资产变化曲线")
+        
+        # 计算每次交易后的资产
+        import pandas as pd
+        from datetime import datetime as dt
+        
+        asset_history = []
+        current_cash = 1000000.0  # 初始资金
+        holdings = {}  # 持仓 {stock_code: {'quantity': x, 'avg_cost': y}}
+        
+        for trans in all_transactions:
+            stock_code = trans['stock_code']
+            
+            if trans['type'] == 'BUY':
+                # 买入
+                current_cash -= trans['amount']
+                if stock_code in holdings:
+                    old_qty = holdings[stock_code]['quantity']
+                    old_cost = holdings[stock_code]['avg_cost']
+                    new_qty = old_qty + trans['quantity']
+                    new_cost = (old_qty * old_cost + trans['amount']) / new_qty
+                    holdings[stock_code] = {'quantity': new_qty, 'avg_cost': new_cost}
+                else:
+                    holdings[stock_code] = {'quantity': trans['quantity'], 'avg_cost': trans['price']}
+            else:
+                # 卖出
+                current_cash += trans['amount']
+                if stock_code in holdings:
+                    holdings[stock_code]['quantity'] -= trans['quantity']
+                    if holdings[stock_code]['quantity'] <= 0:
+                        del holdings[stock_code]
+            
+            # 计算当前持仓市值（使用当时的价格）
+            holdings_value = sum([h['quantity'] * h['avg_cost'] for h in holdings.values()])
+            total_asset = current_cash + holdings_value
+            
+            asset_history.append({
+                'time': trans['time'],
+                'total_asset': total_asset,
+                'cash': current_cash,
+                'holdings_value': holdings_value
+            })
+        
+        # 创建资产曲线图
+        df_asset = pd.DataFrame(asset_history)
+        df_asset['time'] = pd.to_datetime(df_asset['time'])
+        
+        fig_asset = go.Figure()
+        
+        fig_asset.add_trace(go.Scatter(
+            x=df_asset['time'],
+            y=df_asset['total_asset'],
+            mode='lines+markers',
+            name='总资产',
+            line=dict(color='#00ff88', width=3),
+            fill='tozeroy',
+            fillcolor='rgba(0, 255, 136, 0.1)'
+        ))
+        
+        fig_asset.add_trace(go.Scatter(
+            x=df_asset['time'],
+            y=df_asset['cash'],
+            mode='lines',
+            name='现金',
+            line=dict(color='#00d4ff', width=2, dash='dash')
+        ))
+        
+        fig_asset.add_trace(go.Scatter(
+            x=df_asset['time'],
+            y=df_asset['holdings_value'],
+            mode='lines',
+            name='持仓市值',
+            line=dict(color='#ffd700', width=2, dash='dot')
+        ))
+        
+        # 添加初始资金参考线
+        fig_asset.add_hline(
+            y=1000000,
+            line_dash="dash",
+            line_color="rgba(255,255,255,0.3)",
+            annotation_text="初始资金",
+            annotation_position="right"
+        )
+        
+        fig_asset.update_layout(
+            title="资产变化趋势",
+            xaxis_title="时间",
+            yaxis_title="金额（元）",
+            hovermode='x unified',
+            height=400,
+            showlegend=True,
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.02,
+                xanchor="right",
+                x=1
+            ),
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
+            xaxis=dict(gridcolor='rgba(255,255,255,0.1)'),
+            yaxis=dict(gridcolor='rgba(255,255,255,0.1)')
+        )
+        
+        st.plotly_chart(fig_asset, use_container_width=True)
+    
+    st.markdown("---")
+    
+    # ==================== 持仓明细 ====================
     st.markdown("### 📋 持仓明细")
     
     for pos_data in position_data:
