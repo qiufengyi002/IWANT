@@ -324,46 +324,8 @@ def show_positions_page(db, user, get_stock_realtime_sina_func):
             </div>
             """, unsafe_allow_html=True)
     
-    # ==================== 交易统计 ====================
-    st.markdown("---")
-    st.markdown("### 📈 交易统计")
-    
-    # 获取统计数据
-    stats = db.get_user_stats(user['user_id'])
-    all_transactions = db.get_all_transactions(user['user_id'])
-    
-    # 计算交易胜率（卖出盈利的次数 / 总卖出次数）
-    sell_transactions = [t for t in all_transactions if t['type'] == 'SELL']
-    profitable_sells = 0
-    
-    # 简化的胜率计算：比较卖出价格和平均买入成本
-    for sell_trans in sell_transactions:
-        stock_code = sell_trans['stock_code']
-        sell_price = sell_trans['price']
-        
-        # 找到该股票之前的买入记录
-        buy_transactions = [t for t in all_transactions if t['stock_code'] == stock_code and t['type'] == 'BUY' and t['time'] < sell_trans['time']]
-        
-        if buy_transactions:
-            avg_buy_price = sum([t['price'] * t['quantity'] for t in buy_transactions]) / sum([t['quantity'] for t in buy_transactions])
-            if sell_price > avg_buy_price:
-                profitable_sells += 1
-    
-    win_rate = (profitable_sells / len(sell_transactions) * 100) if sell_transactions else 0
-    
-    stat_col1, stat_col2, stat_col3, stat_col4 = st.columns(4)
-    
-    with stat_col1:
-        st.metric("总交易次数", f"{stats['total_trades']}")
-    with stat_col2:
-        st.metric("买入次数", f"{stats['buy_count']}")
-    with stat_col3:
-        st.metric("卖出次数", f"{stats['sell_count']}")
-    with stat_col4:
-        win_rate_color = "normal" if win_rate >= 50 else "inverse"
-        st.metric("交易胜率", f"{win_rate:.1f}%", delta_color=win_rate_color)
-    
     # ==================== 资产曲线图 ====================
+    all_transactions = db.get_all_transactions(user['user_id'])
     if all_transactions:
         st.markdown("---")
         st.markdown("### 📈 资产变化曲线")
@@ -516,7 +478,7 @@ def show_positions_page(db, user, get_stock_realtime_sina_func):
             
             # 卖出操作区域
             with st.expander(f"🔴 卖出 {pos_data['stock_name']}", expanded=False):
-                col_a, col_b, col_c = st.columns([2, 2, 1])
+                col_a, col_b = st.columns([1, 1])
                 
                 with col_a:
                     # A股规则：卖出最小100股，但如果持仓不足100股可以全部卖出
@@ -557,38 +519,37 @@ def show_positions_page(db, user, get_stock_realtime_sina_func):
                         key=f"sell_price_{pos_data['stock_code']}"
                     )
                 
-                with col_c:
-                    st.markdown("<br>", unsafe_allow_html=True)
-                    if st.button(
-                        "确认卖出",
-                        type="primary",
-                        key=f"sell_btn_{pos_data['stock_code']}",
-                        use_container_width=True
-                    ):
-                        # 验证卖出数量
-                        if sell_quantity > pos_data['quantity']:
-                            st.error(f"卖出数量不能超过持仓数量 {pos_data['quantity']}")
-                        elif pos_data['quantity'] >= 100 and sell_quantity % 100 != 0:
-                            st.error("卖出数量必须是100股的倍数")
-                        elif sell_price <= 0.01:
-                            st.error("请输入有效价格")
-                        else:
-                            success, message = db.sell_stock(
-                                user['user_id'],
-                                pos_data['stock_code'],
-                                sell_quantity,
-                                sell_price
-                            )
-                            if success:
-                                st.success(message)
-                                st.rerun()
-                            else:
-                                st.error(message)
-                
-                # 显示预计卖出金额
+                # 显示预计卖出金额（在列布局之后，按钮之前）
                 if sell_quantity > 0 and sell_price > 0.01:
                     sell_amount = sell_quantity * sell_price
                     st.info(f"💰 预计卖出金额: ¥{sell_amount:,.2f}")
+                
+                # 确认卖出按钮
+                if st.button(
+                    "确认卖出",
+                    type="primary",
+                    key=f"sell_btn_{pos_data['stock_code']}",
+                    use_container_width=True
+                ):
+                    # 验证卖出数量
+                    if sell_quantity > pos_data['quantity']:
+                        st.error(f"卖出数量不能超过持仓数量 {pos_data['quantity']}")
+                    elif pos_data['quantity'] >= 100 and sell_quantity % 100 != 0:
+                        st.error("卖出数量必须是100股的倍数")
+                    elif sell_price <= 0.01:
+                        st.error("请输入有效价格")
+                    else:
+                        success, message = db.sell_stock(
+                            user['user_id'],
+                            pos_data['stock_code'],
+                            sell_quantity,
+                            sell_price
+                        )
+                        if success:
+                            st.success(message)
+                            st.rerun()
+                        else:
+                            st.error(message)
 
 
 def show_transactions_page(db, user):

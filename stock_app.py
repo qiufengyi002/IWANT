@@ -159,8 +159,8 @@ else:
     # 导航选项配置
     nav_options = [
         {"name": "行情查询", "icon": "📈"},
-        {"name": "买入股票", "icon": "💰"},
         {"name": "我的自选", "icon": "⭐"},
+        {"name": "买入股票", "icon": "💰"},
         {"name": "我的持仓", "icon": "📊"},
         {"name": "交易记录", "icon": "📜"}
     ]
@@ -842,12 +842,57 @@ if page == "行情查询":
     
     # 日期范围选择
     st.sidebar.markdown("---")
-    st.sidebar.subheader("📅 日期范围")
-    date_option = st.sidebar.radio(
-        "选择时间范围",
-        ["1个月", "3个月", "6个月", "1年"],
-        index=0
-    )
+    st.sidebar.markdown("""
+    <div style="
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        border-radius: 12px;
+        padding: 18px;
+        margin-bottom: 20px;
+        box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+    ">
+        <div style="
+            display: flex;
+            align-items: center;
+            margin-bottom: 10px;
+        ">
+            <span style="font-size: 24px; margin-right: 10px;">📅</span>
+            <span style="font-size: 18px; font-weight: bold; color: white;">
+                日期范围
+            </span>
+        </div>
+        <div style="
+            font-size: 13px;
+            color: rgba(255,255,255,0.85);
+            padding-left: 34px;
+        ">
+            选择查询的时间范围
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # 使用按钮样式的选择器
+    date_options = ["1个月", "3个月", "6个月", "1年"]
+    if 'selected_date_range' not in st.session_state:
+        st.session_state.selected_date_range = "1个月"
+    
+    cols = st.sidebar.columns(2)
+    for idx, option in enumerate(date_options):
+        with cols[idx % 2]:
+            if st.session_state.selected_date_range == option:
+                button_type = "primary"
+            else:
+                button_type = "secondary"
+            
+            if st.button(
+                option,
+                key=f"date_range_{option}",
+                type=button_type,
+                use_container_width=True
+            ):
+                st.session_state.selected_date_range = option
+                st.rerun()
+    
+    date_option = st.session_state.selected_date_range
     
     # 根据选择设置日期范围
     days_map = {"1个月": 30, "3个月": 90, "6个月": 180, "1年": 365}
@@ -1141,12 +1186,15 @@ if page == "行情查询":
                         
                         st.dataframe(display_df, use_container_width=True, height=400)
                         
-                        # 底部信息
+                        # 底部信息 - 使用实际数据的日期范围
+                        actual_start_date = df.index.min().strftime('%Y-%m-%d')
+                        actual_end_date = df.index.max().strftime('%Y-%m-%d')
+                        
                         col_info1, col_info2 = st.columns(2)
                         with col_info1:
                             st.markdown(f"**⏰ 最后更新：** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
                         with col_info2:
-                            st.markdown(f"**📅 数据范围：** {start_date.strftime('%Y-%m-%d')} 至 {end_date.strftime('%Y-%m-%d')}")
+                            st.markdown(f"**📅 数据范围：** {actual_start_date} 至 {actual_end_date} (共{len(df)}条记录)")
                 
         except Exception as e:
             st.error(f"❌ 获取数据时出错：{str(e)}")
