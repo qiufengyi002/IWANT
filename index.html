@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>股票行情展示</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>📈 股票行情</h1>
+            <div class="search-box">
+                <input type="text" id="searchInput" placeholder="输入股票代码（如：AAPL, TSLA）">
+                <button id="searchBtn">搜索</button>
+            </div>
+        </header>
+
+        <main>
+            <section class="market-overview">
+                <h2>市场概览</h2>
+                <div class="indices" id="marketIndices">
+                    <div class="index-card">
+                        <span class="index-name">道琼斯</span>
+                        <span class="index-value" id="dowValue">--</span>
+                        <span class="index-change" id="dowChange">--</span>
+                    </div>
+                    <div class="index-card">
+                        <span class="index-name">纳斯达克</span>
+                        <span class="index-value" id="nasdaqValue">--</span>
+                        <span class="index-change" id="nasdaqChange">--</span>
+                    </div>
+                    <div class="index-card">
+                        <span class="index-name">标普500</span>
+                        <span class="index-value" id="sp500Value">--</span>
+                        <span class="index-change" id="sp500Change">--</span>
+                    </div>
+                </div>
+            </section>
+
+            <section class="watchlist">
+                <h2>自选股</h2>
+                <div class="stock-list" id="watchlist">
+                </div>
+            </section>
+
+            <section class="stock-detail" id="stockDetail" style="display: none;">
+                <h2>股票详情</h2>
+                <div class="detail-header">
+                    <div class="stock-info">
+                        <h3 id="detailSymbol">--</h3>
+                        <p id="detailName">--</p>
+                    </div>
+                    <div class="stock-price">
+                        <span class="price" id="detailPrice">--</span>
+                        <span class="change" id="detailChange">--</span>
+                    </div>
+                </div>
+                <div class="chart-container">
+                    <canvas id="priceChart"></canvas>
+                </div>
+                <div class="stock-stats">
+                    <div class="stat-item">
+                        <span class="label">开盘价</span>
+                        <span class="value" id="detailOpen">--</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="label">最高价</span>
+                        <span class="value" id="detailHigh">--</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="label">最低价</span>
+                        <span class="value" id="detailLow">--</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="label">成交量</span>
+                        <span class="value" id="detailVolume">--</span>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <footer>
+            <p>数据来源：免费API | 更新时间：<span id="updateTime">--</span></p>
+        </footer>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>
