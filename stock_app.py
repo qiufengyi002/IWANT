@@ -78,9 +78,6 @@ st.markdown("""
 </script>
 """, unsafe_allow_html=True)
 
-# 标题
-st.markdown('<h1 style="text-align: center; color: #00f5ff;">📈 A股行情中心</h1>', unsafe_allow_html=True)
-
 # 初始化用户session - 使用query params保持登录状态
 if 'user' not in st.session_state:
     st.session_state.user = None
@@ -653,8 +650,24 @@ MARKETS = {
 # ==================== 页面路由 ====================
 if page == "行情查询":
     # ==================== 行情查询页面 ====================
+    
+    # 欢迎横幅 - 简化版
+    from datetime import datetime
+    current_time = datetime.now().strftime("%Y年%m月%d日 %H:%M")
+    
+    banner_html = f"""
+<div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 20px; padding: 40px 30px; margin-bottom: 25px; box-shadow: 0 10px 30px rgba(0,0,0,0.3); text-align: center;">
+    <h1 style="color: white; margin: 0; font-size: 42px; font-weight: bold; text-shadow: 2px 2px 4px rgba(0,0,0,0.2);">📈 A股行情中心</h1>
+    <p style="color: rgba(255,255,255,0.95); margin: 15px 0; font-size: 18px; font-weight: 500;">💰 实时行情 · 📊 智能分析 · 🎯 模拟交易</p>
+    <div style="display: inline-block; background: rgba(255,255,255,0.2); padding: 8px 20px; border-radius: 20px; margin-top: 10px;">
+        <span style="color: white; font-size: 14px;">🕐 {current_time} | 数据实时更新</span>
+    </div>
+</div>
+"""
+    st.markdown(banner_html, unsafe_allow_html=True)
+    
     # 显示市场行情
-    st.markdown("## 🌍 A股市场概览")
+    st.markdown("## 🌍 市场指数")
 
     # 获取A股指数实时数据
     a_stock_indices_data = None
@@ -713,6 +726,35 @@ if page == "行情查询":
     
     st.markdown("---")
     
+    # 热门股票快速入口
+    st.markdown("## 🔥 热门股票")
+    
+    hot_stocks = [
+        {"code": "600519", "name": "贵州茅台", "icon": "🍷"},
+        {"code": "000858", "name": "五粮液", "icon": "🍶"},
+        {"code": "300750", "name": "宁德时代", "icon": "🔋"},
+        {"code": "600036", "name": "招商银行", "icon": "🏦"},
+        {"code": "000333", "name": "美的集团", "icon": "🏠"},
+        {"code": "601318", "name": "中国平安", "icon": "🛡️"}
+    ]
+    
+    cols = st.columns(6)
+    for idx, stock in enumerate(hot_stocks):
+        with cols[idx]:
+            if st.button(
+                f"{stock['icon']}\n{stock['name']}", 
+                key=f"hot_{stock['code']}",
+                use_container_width=True
+            ):
+                # 设置查看股票的信息
+                symbol = f"{stock['code']}.SS" if stock['code'].startswith('6') or stock['code'].startswith('5') or stock['code'].startswith('688') else f"{stock['code']}.SZ"
+                st.session_state['view_stock_code'] = stock['code']
+                st.session_state['view_stock_name'] = stock['name']
+                st.session_state['view_stock_symbol'] = symbol
+                st.rerun()
+    
+    st.markdown("---")
+    
     # 侧边栏 - 输入区域
     st.sidebar.header("📊 股票查询")
     
@@ -722,28 +764,34 @@ if page == "行情查询":
     # 初始化session state
     if 'last_search_query' not in st.session_state:
         st.session_state.last_search_query = ""
-    if 'last_quick_select' not in st.session_state:
-        st.session_state.last_quick_select = ""
     
-    # 处理从自选股页面跳转过来的快速选择
+    # 处理从自选股页面跳转过来的快速选择或热门股票点击
     quick_select_value = ""
     auto_select_symbol = None
     
-    # 检查是否有从自选股传来的查看请求
+    # 检查是否有从自选股传来的查看请求或热门股票点击
     if 'view_stock_code' in st.session_state and st.session_state.get('view_stock_code'):
         quick_select_value = f"{st.session_state['view_stock_code']} - {st.session_state['view_stock_name']}"
         auto_select_symbol = st.session_state['view_stock_symbol']
+    # 如果没有任何选择，默认显示贵州茅台
+    elif 'default_stock_loaded' not in st.session_state:
+        st.session_state['view_stock_code'] = '600519'
+        st.session_state['view_stock_name'] = '贵州茅台'
+        st.session_state['view_stock_symbol'] = '600519.SS'
+        st.session_state['default_stock_loaded'] = True
+        quick_select_value = "600519 - 贵州茅台"
+        auto_select_symbol = "600519.SS"
     
-    # 搜索输入框（使用唯一key防止浏览器自动填充）
+    # 搜索输入框
     search_query = st.sidebar.text_input(
         "输入股票代码或名称",
         value=quick_select_value,
         placeholder="如：茅台、600519",
         help="💡 输入关键词后，下方会显示匹配的股票列表",
-        key="stock_search_input"
+        key="stock_search_input_v2"
     )
     
-    # 如果用户修改了搜索框内容，清空自选股跳转标记
+    # 如果用户手动修改了搜索框内容，清空跳转标记
     if search_query != quick_select_value and st.session_state.get('view_stock_code'):
         st.session_state['view_stock_code'] = None
         st.session_state['view_stock_name'] = None
@@ -754,12 +802,12 @@ if page == "行情查询":
     stock_symbol_from_search = None
     search_selected = False
     
-    # 如果是从自选股跳转过来的，直接使用传入的symbol
+    # 如果是从自选股跳转过来的或点击热门股票，直接使用传入的symbol
     if auto_select_symbol:
         stock_symbol_from_search = auto_select_symbol
         search_selected = True
         # 显示选中的股票信息
-        st.sidebar.success(f"✅ 已选择: {quick_select_value}")
+        st.sidebar.success(f"✅ 已选择: {search_query}")
     elif search_query:
         search_results = search_stock_by_name(search_query, stock_list)
         
@@ -792,16 +840,6 @@ if page == "行情查询":
     else:
         st.sidebar.info("💡 请输入股票名称或代码")
     
-    # 快速选择热门股票
-    st.sidebar.markdown("---")
-    st.sidebar.markdown("### 🔥 快速选择热门股票")
-    quick_stocks = st.sidebar.selectbox(
-        "快速选择热门股票",
-        ["", "600519 - 贵州茅台", "000001 - 平安银行", "000858 - 五粮液", "601318 - 中国平安", "000333 - 美的集团", "300750 - 宁德时代", "600036 - 招商银行"],
-        key="quick_select",
-        label_visibility="collapsed"
-    )
-    
     # 日期范围选择
     st.sidebar.markdown("---")
     st.sidebar.subheader("📅 日期范围")
@@ -817,13 +855,11 @@ if page == "行情查询":
     start_date = datetime.now() - timedelta(days=days)
     end_date = datetime.now()
     
-    # 检测用户操作：判断是搜索还是快速选择
+    # 检测用户操作：判断是搜索
     search_changed = search_query != st.session_state.last_search_query
-    quick_changed = quick_stocks != st.session_state.last_quick_select
     
     # 更新session state
     st.session_state.last_search_query = search_query
-    st.session_state.last_quick_select = quick_stocks
     
     # 确定最终使用哪个股票
     stock_symbol = None
@@ -833,29 +869,14 @@ if page == "行情查询":
     if search_changed and search_selected and stock_symbol_from_search:
         stock_symbol = stock_symbol_from_search
         query_button = True
-    # 如果快速选择有变化且有选择，使用快速选择
-    elif quick_changed and quick_stocks:
-        code = quick_stocks.split(" - ")[0]
-        if code.startswith('6') or code.startswith('5') or code.startswith('688'):
-            stock_symbol = f"{code}.SS"
-        else:
-            stock_symbol = f"{code}.SZ"
-        query_button = True
-    # 否则，使用当前有效的选择（搜索优先）
+    # 否则，使用当前有效的选择
     elif search_selected and stock_symbol_from_search:
         stock_symbol = stock_symbol_from_search
-        query_button = True
-    elif quick_stocks:
-        code = quick_stocks.split(" - ")[0]
-        if code.startswith('6') or code.startswith('5') or code.startswith('688'):
-            stock_symbol = f"{code}.SS"
-        else:
-            stock_symbol = f"{code}.SZ"
         query_button = True
     
     # 添加清除缓存按钮
     st.sidebar.markdown("---")
-    if st.sidebar.button("�️ 清除缓存"):
+    if st.sidebar.button("🔄 清除缓存"):
         st.cache_data.clear()
         st.success("✅ 缓存已清除！")
         st.rerun()
@@ -1065,14 +1086,67 @@ if page == "行情查询":
                         # 显示详细数据表格
                         st.markdown("### 📊 详细数据")
                         
+                        # 数据统计卡片
+                        stat_col1, stat_col2, stat_col3, stat_col4 = st.columns(4)
+                        
+                        with stat_col1:
+                            max_price = df['High'].max()
+                            st.metric("📈 期间最高", f"¥{max_price:.2f}")
+                        
+                        with stat_col2:
+                            min_price = df['Low'].min()
+                            st.metric("📉 期间最低", f"¥{min_price:.2f}")
+                        
+                        with stat_col3:
+                            avg_volume = df['Volume'].mean()
+                            st.metric("📊 平均成交量", f"{avg_volume:,.0f}")
+                        
+                        with stat_col4:
+                            price_range = ((max_price - min_price) / min_price * 100) if min_price > 0 else 0
+                            st.metric("📏 价格波动", f"{price_range:.2f}%")
+                        
+                        st.markdown("---")
+                        
+                        # 数据表格展示
                         display_df = df.copy()
                         display_df.index = display_df.index.strftime('%Y-%m-%d')
-                        display_df = display_df.round(2)
-                        display_df.columns = ['开盘价', '最高价', '最低价', '收盘价', '成交量']
+                        
+                        # 计算涨跌
+                        display_df['涨跌额'] = display_df['Close'].diff()
+                        display_df['涨跌幅%'] = display_df['Close'].pct_change() * 100
+                        
+                        # 重命名列
+                        display_df = display_df.rename(columns={
+                            'Open': '开盘价',
+                            'High': '最高价',
+                            'Low': '最低价',
+                            'Close': '收盘价',
+                            'Volume': '成交量'
+                        })
+                        
+                        # 格式化数值
+                        display_df['开盘价'] = display_df['开盘价'].apply(lambda x: f"¥{x:.2f}")
+                        display_df['最高价'] = display_df['最高价'].apply(lambda x: f"¥{x:.2f}")
+                        display_df['最低价'] = display_df['最低价'].apply(lambda x: f"¥{x:.2f}")
+                        display_df['收盘价'] = display_df['收盘价'].apply(lambda x: f"¥{x:.2f}")
+                        display_df['成交量'] = display_df['成交量'].apply(lambda x: f"{x:,.0f}")
+                        display_df['涨跌额'] = display_df['涨跌额'].apply(lambda x: f"{x:+.2f}" if pd.notna(x) else "-")
+                        display_df['涨跌幅%'] = display_df['涨跌幅%'].apply(lambda x: f"{x:+.2f}%" if pd.notna(x) else "-")
+                        
+                        # 选择要显示的列
+                        display_df = display_df[['开盘价', '最高价', '最低价', '收盘价', '涨跌额', '涨跌幅%', '成交量']]
+                        
+                        # 倒序显示（最新的在上面）
+                        display_df = display_df.iloc[::-1]
                         
                         st.dataframe(display_df, use_container_width=True, height=400)
                         
-                        st.markdown(f"**⏰ 最后更新时间：** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+                        # 底部信息
+                        col_info1, col_info2 = st.columns(2)
+                        with col_info1:
+                            st.markdown(f"**⏰ 最后更新：** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+                        with col_info2:
+                            st.markdown(f"**📅 数据范围：** {start_date.strftime('%Y-%m-%d')} 至 {end_date.strftime('%Y-%m-%d')}")
                 
         except Exception as e:
             st.error(f"❌ 获取数据时出错：{str(e)}")
@@ -1116,6 +1190,34 @@ elif page == "交易记录":
         show_transactions_page(db, st.session_state.user)
     else:
         st.warning("请先登录")
+
+# 使用指南（所有页面底部显示）
+st.markdown("---")
+with st.expander("📖 使用指南", expanded=False):
+    st.markdown("""
+    ### 快速开始
+    
+    1️⃣ **查询股票**
+    - 在左侧搜索框输入股票代码或名称
+    - 或点击首页热门股票快速查看
+    
+    2️⃣ **模拟交易**
+    - 点击左侧"买入股票"进行交易
+    - 初始资金100万元，可自由买卖
+    
+    3️⃣ **管理持仓**
+    - 在"我的持仓"查看盈亏情况
+    - 实时更新，准确计算收益
+    
+    4️⃣ **自选股**
+    - 添加关注的股票到自选
+    - 快速查看涨跌情况
+    
+    ### 数据说明
+    - 📊 数据来源：新浪财经API
+    - ⏱️ 更新频率：实时（缓存1分钟）
+    - 🎯 数据准确性：与同花顺一致
+    """)
 
 # 页脚
 st.markdown("---")
